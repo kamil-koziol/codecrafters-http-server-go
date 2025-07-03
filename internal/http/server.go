@@ -5,8 +5,21 @@ import (
 	"net"
 )
 
-func response(statusCode int, reason string) []byte {
-	return fmt.Appendf(nil, "HTTP/1.1 %d %s\r\n\r\n", statusCode, reason)
+const CRLF = "\r\n"
+
+type Status int
+
+const (
+	StatusOK Status = 200
+)
+
+var statusReasons = map[Status]string{
+	StatusOK: "OK",
+}
+
+func response(status Status) []byte {
+	reason := statusReasons[status]
+	return fmt.Appendf(nil, "HTTP/1.1 %d %s%s%s", status, reason, CRLF, CRLF)
 }
 
 type Server struct{}
@@ -23,7 +36,7 @@ func (s *Server) Run(hostport string) error {
 		return fmt.Errorf("error accepting connection: %w", err)
 	}
 
-	_, err = conn.Write(response(200, "OK"))
+	_, err = conn.Write(response(StatusOK))
 	if err != nil {
 		return fmt.Errorf("unable to write: %w", err)
 	}
