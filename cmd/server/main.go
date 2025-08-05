@@ -20,6 +20,16 @@ func main() {
 		h.Set("Content-Type", "text/plain")
 		http.WriteResponse(w, http.StatusOK, []byte(str), h)
 	})
+
+	router.GET("/user-agent", func(r *http.Request, w io.Writer) {
+		userAgent, _ := r.Headers.Get("User-Agent")
+
+		h := http.Headers{}
+		h.Set("Content-Type", "text/plain")
+
+		http.WriteResponse(w, http.StatusOK, []byte(userAgent), h)
+	})
+
 	srv := http.Server{
 		Router: router,
 	}
