@@ -138,7 +138,7 @@ func (s *Server) Run(hostport string) error {
 			return fmt.Errorf("error accepting connection: %w", err)
 		}
 
-		s.handleConnection(conn)
+		go s.handleConnection(conn)
 	}
 }
 
