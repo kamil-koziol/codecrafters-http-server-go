@@ -5,8 +5,8 @@ import (
 	"bytes"
 	"fmt"
 	"io"
-	"log"
 	"net"
+	"strconv"
 	"strings"
 )
 
@@ -24,9 +24,27 @@ var statusReasons = map[Status]string{
 	StatusNotFound: "Not Found",
 }
 
-func response(status Status) []byte {
+func WriteResponse(w io.Writer, status Status, body []byte, headers Headers) error {
 	reason := statusReasons[status]
-	return fmt.Appendf(nil, "HTTP/1.1 %d %s%s%s", status, reason, CRLF, CRLF)
+	b := fmt.Appendf(nil, "HTTP/1.1 %d %s%s", status, reason, CRLF)
+
+	if body != nil {
+		headers.Set("Content-Length", strconv.Itoa(len(body)))
+	}
+
+	if headers.headers != nil {
+		for k, v := range headers.headers {
+			b = fmt.Appendf(b, "%s: %s%s", k, v, CRLF)
+		}
+	}
+
+	b = fmt.Append(b, CRLF)
+	if body != nil {
+		b = fmt.Append(b, string(body))
+	}
+
+	_, err := w.Write(b)
+	return err
 }
 
 type Method string
@@ -34,31 +52,6 @@ type Method string
 const (
 	MethodGET Method = "GET"
 )
-
-type Headers struct {
-	headers map[string]string
-}
-
-func (h *Headers) Get(key string) (string, bool) {
-	val, found := h.headers[strings.ToLower(key)]
-	return val, found
-}
-
-func (h *Headers) Set(key string, value string) {
-	if h.headers == nil {
-		h.headers = map[string]string{}
-	}
-
-	h.headers[strings.ToLower(key)] = value
-}
-
-type Request struct {
-	Method  Method
-	Path    string
-	Version string
-	Headers Headers
-	Body    []byte
-}
 
 func scanCRLF(data []byte, atEOF bool) (advance int, token []byte, err error) {
 	if atEOF && len(data) == 0 {
@@ -128,7 +121,9 @@ scanning:
 	return &req, nil
 }
 
-type Server struct{}
+type Server struct {
+	Router Router
+}
 
 func (s *Server) Run(hostport string) error {
 	l, err := net.Listen("tcp", hostport)
@@ -142,11 +137,12 @@ func (s *Server) Run(hostport string) error {
 		if err != nil {
 			return fmt.Errorf("error accepting connection: %w", err)
 		}
-		handleConnection(conn)
+
+		s.handleConnection(conn)
 	}
 }
 
-func handleConnection(conn net.Conn) {
+func (s *Server) handleConnection(conn net.Conn) {
 	defer conn.Close()
 
 	req, err := parseRequest(conn)
@@ -154,16 +150,5 @@ func handleConnection(conn net.Conn) {
 		return
 	}
 
-	var resp []byte
-	if req.Path == "/" {
-		resp = response(StatusOK)
-	} else {
-		resp = response(StatusNotFound)
-	}
-
-	_, err = conn.Write(resp)
-	if err != nil {
-		log.Printf("unable to write %v", err)
-		return
-	}
+	s.Router.Handle(req, conn)
 }
