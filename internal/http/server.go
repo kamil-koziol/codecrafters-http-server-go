@@ -15,13 +15,15 @@ const CRLF string = "\r\n"
 type Status int
 
 const (
-	StatusOK       Status = 200
-	StatusNotFound Status = 404
+	StatusOK                  Status = 200
+	StatusNotFound            Status = 404
+	StatusInternalServerError Status = 500
 )
 
 var statusReasons = map[Status]string{
-	StatusOK:       "OK",
-	StatusNotFound: "Not Found",
+	StatusOK:                  "OK",
+	StatusNotFound:            "Not Found",
+	StatusInternalServerError: "Internal Server Error",
 }
 
 func WriteResponse(w io.Writer, status Status, body []byte, headers Headers) error {

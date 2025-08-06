@@ -22,17 +22,19 @@ func (r *Route) Matches(path string) (*PathParameters, bool) {
 	routeSplit := strings.Split(r.Path, "/")
 	pathSplit := strings.Split(path, "/")
 
-	if len(routeSplit) != len(pathSplit) {
-		return nil, false
-	}
-
-	for i := range len(routeSplit) {
+	longerSplit := max(len(routeSplit), len(pathSplit))
+	for i := range longerSplit {
 		if i == 0 {
 			continue
 		}
 
-		isVariable := len(routeSplit[i]) >= 2 && routeSplit[i][0] == '{' && routeSplit[i][len(routeSplit[i])-1] == '}'
+		routeSegment := routeSplit[i]
+		if routeSegment == "*" {
+			p.Parameters["*"] = strings.Join(pathSplit[i:], "/")
+			return p, true
+		}
 
+		isVariable := len(routeSegment) >= 2 && routeSegment[0] == '{' && routeSegment[len(routeSplit[i])-1] == '}'
 		if isVariable {
 			variable := routeSplit[i][1 : len(routeSplit[i])-1]
 			p.Parameters[variable] = pathSplit[i]

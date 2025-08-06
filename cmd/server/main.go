@@ -1,13 +1,19 @@
 package main
 
 import (
+	"flag"
 	"io"
 	"log"
+	"os"
+	"path/filepath"
 
 	"github.com/codecrafters-io/http-server-starter-go/internal/http"
 )
 
 func main() {
+	directory := flag.String("directory", "", "Directory where the static files are stored")
+	flag.Parse()
+
 	router := http.Router{}
 
 	router.GET("/", func(r *http.Request, w io.Writer) {
@@ -28,6 +34,34 @@ func main() {
 		h.Set("Content-Type", "text/plain")
 
 		http.WriteResponse(w, http.StatusOK, []byte(userAgent), h)
+	})
+
+	router.GET("/files/*", func(r *http.Request, w io.Writer) {
+		path := r.GetPath("*")
+
+		fpath := filepath.Join(*directory, path)
+		f, err := os.Open(fpath)
+		if err != nil {
+			if os.IsNotExist(err) {
+				http.WriteResponse(w, http.StatusNotFound, nil, http.Headers{})
+				return
+			}
+
+			http.WriteResponse(w, http.StatusInternalServerError, nil, http.Headers{})
+			return
+		}
+		defer f.Close()
+
+		fileContents, err := io.ReadAll(f)
+		if err != nil {
+			http.WriteResponse(w, http.StatusInternalServerError, nil, http.Headers{})
+			return
+		}
+
+		h := http.Headers{}
+		h.Set("Content-Type", "application/octet-stream")
+
+		http.WriteResponse(w, http.StatusOK, fileContents, h)
 	})
 
 	srv := http.Server{
