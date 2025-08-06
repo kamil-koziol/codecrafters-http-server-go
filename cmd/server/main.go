@@ -64,6 +64,18 @@ func main() {
 		http.WriteResponse(w, http.StatusOK, fileContents, h)
 	})
 
+	router.POST("/files/{filename}", func(r *http.Request, w io.Writer) {
+		filename := r.GetPath("filename")
+
+		fpath := filepath.Join(*directory, filename)
+		if err := os.WriteFile(fpath, r.Body, 0644); err != nil {
+			http.WriteResponse(w, http.StatusInternalServerError, nil, http.Headers{})
+			return
+		}
+
+		http.WriteResponse(w, http.StatusCreated, nil, http.Headers{})
+	})
+
 	srv := http.Server{
 		Router: router,
 	}

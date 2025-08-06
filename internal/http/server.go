@@ -1,7 +1,6 @@
 package http
 
 import (
-	"bufio"
 	"bytes"
 	"fmt"
 	"io"
@@ -10,12 +9,13 @@ import (
 	"strings"
 )
 
-const CRLF string = "\r\n"
+var CRLF = []byte{'\r', '\n'}
 
 type Status int
 
 const (
 	StatusOK                  Status = 200
+	StatusCreated             Status = 201
 	StatusNotFound            Status = 404
 	StatusInternalServerError Status = 500
 )
@@ -24,11 +24,12 @@ var statusReasons = map[Status]string{
 	StatusOK:                  "OK",
 	StatusNotFound:            "Not Found",
 	StatusInternalServerError: "Internal Server Error",
+	StatusCreated:             "Created",
 }
 
 func WriteResponse(w io.Writer, status Status, body []byte, headers Headers) error {
 	reason := statusReasons[status]
-	b := fmt.Appendf(nil, "HTTP/1.1 %d %s%s", status, reason, CRLF)
+	b := fmt.Appendf(nil, "HTTP/1.1 %d %s%s", status, reason, string(CRLF))
 
 	if body != nil {
 		headers.Set("Content-Length", strconv.Itoa(len(body)))
@@ -36,11 +37,11 @@ func WriteResponse(w io.Writer, status Status, body []byte, headers Headers) err
 
 	if headers.headers != nil {
 		for k, v := range headers.headers {
-			b = fmt.Appendf(b, "%s: %s%s", k, v, CRLF)
+			b = fmt.Appendf(b, "%s: %s%s", k, v, string(CRLF))
 		}
 	}
 
-	b = fmt.Append(b, CRLF)
+	b = fmt.Append(b, string(CRLF))
 	if body != nil {
 		b = fmt.Append(b, string(body))
 	}
@@ -52,72 +53,79 @@ func WriteResponse(w io.Writer, status Status, body []byte, headers Headers) err
 type Method string
 
 const (
-	MethodGET Method = "GET"
+	MethodGET  Method = "GET"
+	MethodPOST Method = "POST"
 )
-
-func scanCRLF(data []byte, atEOF bool) (advance int, token []byte, err error) {
-	if atEOF && len(data) == 0 {
-		return 0, nil, nil
-	}
-	if i := bytes.Index(data, []byte(CRLF)); i >= 0 {
-		return i + len(CRLF), data[0:i], nil
-	}
-
-	// If we're at EOF, we have a final, non-terminated line. Return it.
-	if atEOF {
-		return len(data), data, nil
-	}
-	// Request more data.
-	return 0, nil, nil
-}
 
 // parseRequest parses HTTP request into [Request]
 // Example HTTP request:
 // GET /index.html HTTP/1.1\r\nHost: localhost:4221\r\nUser-Agent: curl/7.64.1\r\nAccept: */*\r\n\r\nRequest body
 func parseRequest(body io.Reader) (*Request, error) {
 	req := Request{}
-	scanner := bufio.NewScanner(body)
-	scanner.Split(scanCRLF)
+	var buf []byte
 
 	mode := "requestLine"
-scanning:
-	for scanner.Scan() {
-		line := scanner.Text()
-
-		switch mode {
-		case "requestLine":
-			// Request line
-			// GET /index.html HTTP/1.1\r\n
-			parts := strings.Split(line, " ")
-			if len(parts) != 3 {
-				return nil, fmt.Errorf("invalid request line format")
-			}
-
-			req.Method = Method(parts[0])
-			req.Path = parts[1]
-			version := parts[2][:len(parts[2])]
-			req.Version = version
-
-			mode = "headers"
-		case "headers":
-			// Headers
-			// Host: localhost:4221\r\nUser-Agent: curl/7.64.1\r\nAccept: */*\r\n\r\n
-			if line == "" {
-				break scanning
-			}
-
-			parts := strings.SplitN(line, ":", 2)
-			if len(parts) != 2 {
-				return nil, fmt.Errorf("invalid header format: %v", parts)
-			}
-			headerKey := parts[0]
-			headerVal := parts[1][1:len(parts[1])]
-			req.Headers.Set(headerKey, headerVal)
+	for {
+		ch := make([]byte, 1)
+		n, err := body.Read(ch)
+		if n == 0 && err == io.EOF {
+			break
 		}
-	}
+		if err != nil {
+			return nil, fmt.Errorf("error reading body: %v", err)
+		}
+		buf = append(buf, ch...)
 
-	if err := scanner.Err(); err != nil {
-		return nil, err
+		if bytes.HasSuffix(buf, CRLF) && mode != "body" {
+			line := string(buf[:len(buf)-len(CRLF)])
+
+			switch mode {
+			case "requestLine":
+				// Request line
+				// GET /index.html HTTP/1.1\r\n
+				parts := strings.Split(line, " ")
+				if len(parts) != 3 {
+					return nil, fmt.Errorf("invalid request line format")
+				}
+
+				req.Method = Method(parts[0])
+				req.Path = parts[1]
+				version := parts[2][:len(parts[2])]
+				req.Version = version
+
+				mode = "headers"
+			case "headers":
+				// Headers
+				// Host: localhost:4221\r\nUser-Agent: curl/7.64.1\r\nAccept: */*\r\n\r\n
+
+				if len(line) == 0 {
+					// read the body
+					if contentLength, exists := req.Headers.Get("Content-Length"); exists {
+						length := 0
+						fmt.Sscanf(contentLength, "%d", &length)
+						bodyContentsBytes := make([]byte, length)
+						_, err := io.ReadFull(body, bodyContentsBytes)
+						if err != nil {
+							return nil, fmt.Errorf("failed to read body: %v", err)
+						}
+						req.Body = bodyContentsBytes
+						return &req, nil
+					}
+
+					return &req, nil
+				}
+
+				parts := strings.SplitN(line, ":", 2)
+				if len(parts) != 2 {
+					return nil, fmt.Errorf("invalid header format: %v", parts)
+				}
+				headerKey := parts[0]
+				headerVal := parts[1][1:len(parts[1])]
+				req.Headers.Set(headerKey, headerVal)
+			}
+
+			buf = nil
+		}
 	}
 
 	return &req, nil

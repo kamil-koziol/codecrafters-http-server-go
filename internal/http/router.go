@@ -10,6 +10,7 @@ type Router struct {
 }
 
 type Route struct {
+	Method  Method
 	Path    string
 	Handler HandlerFunc
 }
@@ -56,11 +57,18 @@ type PathParameters struct {
 type HandlerFunc func(*Request, io.Writer)
 
 func (r *Router) GET(path string, handler HandlerFunc) {
-	r.routes = append(r.routes, Route{Path: path, Handler: handler})
+	r.routes = append(r.routes, Route{Path: path, Handler: handler, Method: MethodGET})
 }
 
-func (r *Router) findRoute(path string) (*Route, *PathParameters, bool) {
+func (r *Router) POST(path string, handler HandlerFunc) {
+	r.routes = append(r.routes, Route{Path: path, Handler: handler, Method: MethodPOST})
+}
+
+func (r *Router) findRoute(path string, method Method) (*Route, *PathParameters, bool) {
 	for _, route := range r.routes {
+		if route.Method != method {
+			continue
+		}
 		if params, matches := route.Matches(path); matches {
 			return &route, params, true
 		}
@@ -70,7 +78,7 @@ func (r *Router) findRoute(path string) (*Route, *PathParameters, bool) {
 }
 
 func (r *Router) Handle(req *Request, w io.Writer) {
-	route, pathParameters, found := r.findRoute(req.Path)
+	route, pathParameters, found := r.findRoute(req.Path, req.Method)
 	if !found {
 		_ = WriteResponse(w, StatusNotFound, nil, Headers{})
 		return
