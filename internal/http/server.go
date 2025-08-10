@@ -79,6 +79,7 @@ func parseRequest(body io.Reader) (*Request, error) {
 		if bytes.HasSuffix(buf, CRLF) && mode != "body" {
 			line := string(buf[:len(buf)-len(CRLF)])
 
+		modeSwitch:
 			switch mode {
 			case "requestLine":
 				// Request line
@@ -99,20 +100,8 @@ func parseRequest(body io.Reader) (*Request, error) {
 				// Host: localhost:4221\r\nUser-Agent: curl/7.64.1\r\nAccept: */*\r\n\r\n
 
 				if len(line) == 0 {
-					// read the body
-					if contentLength, exists := req.Headers.Get("Content-Length"); exists {
-						length := 0
-						fmt.Sscanf(contentLength, "%d", &length)
-						bodyContentsBytes := make([]byte, length)
-						_, err := io.ReadFull(body, bodyContentsBytes)
-						if err != nil {
-							return nil, fmt.Errorf("failed to read body: %v", err)
-						}
-						req.Body = bodyContentsBytes
-						return &req, nil
-					}
-
-					return &req, nil
+					mode = "body"
+					goto modeSwitch
 				}
 
 				parts := strings.SplitN(line, ":", 2)
@@ -122,6 +111,19 @@ func parseRequest(body io.Reader) (*Request, error) {
 				headerKey := parts[0]
 				headerVal := parts[1][1:len(parts[1])]
 				req.Headers.Set(headerKey, headerVal)
+			case "body":
+				if contentLength, exists := req.Headers.Get("Content-Length"); exists {
+					length := 0
+					fmt.Sscanf(contentLength, "%d", &length)
+					bodyContentsBytes := make([]byte, length)
+					_, err := io.ReadFull(body, bodyContentsBytes)
+					if err != nil {
+						return nil, fmt.Errorf("failed to read body: %v", err)
+					}
+					req.Body = bodyContentsBytes
+				}
+
+				return &req, nil
 			}
 
 			buf = nil
