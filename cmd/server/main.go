@@ -17,14 +17,14 @@ func main() {
 	router := http.Router{}
 
 	router.GET("/", func(r *http.Request, w io.Writer) {
-		http.WriteResponse(w, http.StatusOK, nil, http.Headers{})
+		http.WriteResponse(r, w, http.StatusOK, nil, http.Headers{})
 	})
 
 	router.GET("/echo/{str}", func(r *http.Request, w io.Writer) {
 		str := r.GetPath("str")
 		h := http.Headers{}
 		h.Set("Content-Type", "text/plain")
-		http.WriteResponse(w, http.StatusOK, []byte(str), h)
+		http.WriteResponse(r, w, http.StatusOK, []byte(str), h)
 	})
 
 	router.GET("/user-agent", func(r *http.Request, w io.Writer) {
@@ -33,7 +33,7 @@ func main() {
 		h := http.Headers{}
 		h.Set("Content-Type", "text/plain")
 
-		http.WriteResponse(w, http.StatusOK, []byte(userAgent), h)
+		http.WriteResponse(r, w, http.StatusOK, []byte(userAgent), h)
 	})
 
 	router.GET("/files/*", func(r *http.Request, w io.Writer) {
@@ -43,25 +43,25 @@ func main() {
 		f, err := os.Open(fpath)
 		if err != nil {
 			if os.IsNotExist(err) {
-				http.WriteResponse(w, http.StatusNotFound, nil, http.Headers{})
+				http.WriteResponse(r, w, http.StatusNotFound, nil, http.Headers{})
 				return
 			}
 
-			http.WriteResponse(w, http.StatusInternalServerError, nil, http.Headers{})
+			http.WriteResponse(r, w, http.StatusInternalServerError, nil, http.Headers{})
 			return
 		}
 		defer f.Close()
 
 		fileContents, err := io.ReadAll(f)
 		if err != nil {
-			http.WriteResponse(w, http.StatusInternalServerError, nil, http.Headers{})
+			http.WriteResponse(r, w, http.StatusInternalServerError, nil, http.Headers{})
 			return
 		}
 
 		h := http.Headers{}
 		h.Set("Content-Type", "application/octet-stream")
 
-		http.WriteResponse(w, http.StatusOK, fileContents, h)
+		http.WriteResponse(r, w, http.StatusOK, fileContents, h)
 	})
 
 	router.POST("/files/{filename}", func(r *http.Request, w io.Writer) {
@@ -69,11 +69,11 @@ func main() {
 
 		fpath := filepath.Join(*directory, filename)
 		if err := os.WriteFile(fpath, r.Body, 0644); err != nil {
-			http.WriteResponse(w, http.StatusInternalServerError, nil, http.Headers{})
+			http.WriteResponse(r, w, http.StatusInternalServerError, nil, http.Headers{})
 			return
 		}
 
-		http.WriteResponse(w, http.StatusCreated, nil, http.Headers{})
+		http.WriteResponse(r, w, http.StatusCreated, nil, http.Headers{})
 	})
 
 	srv := http.Server{

@@ -2,6 +2,7 @@ package http
 
 import (
 	"bytes"
+	"compress/gzip"
 	"fmt"
 	"io"
 	"net"
@@ -27,23 +28,83 @@ var statusReasons = map[Status]string{
 	StatusCreated:             "Created",
 }
 
-func WriteResponse(w io.Writer, status Status, body []byte, headers Headers) error {
-	reason := statusReasons[status]
-	b := fmt.Appendf(nil, "HTTP/1.1 %d %s%s", status, reason, string(CRLF))
+type BodyEncoder interface {
+	Encode([]byte) ([]byte, error)
+}
 
-	if body != nil {
-		headers.Set("Content-Length", strconv.Itoa(len(body)))
+type PlainBodyEncoder struct {
+}
+
+func (e *PlainBodyEncoder) Encode(b []byte) ([]byte, error) {
+	return b, nil
+}
+
+type GZIPBodyEncoder struct {
+}
+
+func (e *GZIPBodyEncoder) Encode(b []byte) ([]byte, error) {
+	var buf bytes.Buffer
+	w := gzip.NewWriter(&buf)
+	_, err := w.Write(b)
+	if err != nil {
+		return nil, fmt.Errorf("unable to gzip write: %w", err)
+	}
+	defer w.Close()
+	return buf.Bytes(), nil
+}
+
+func appendHeader(b []byte, key string, value string) []byte {
+	return fmt.Appendf(b, "%s: %s%s", key, value, string(CRLF))
+}
+
+func encoderForEncoding(encoding string) (BodyEncoder, bool) {
+	switch encoding {
+	case "gzip":
+		return &GZIPBodyEncoder{}, true
 	}
 
-	if headers.headers != nil {
-		for k, v := range headers.headers {
-			b = fmt.Appendf(b, "%s: %s%s", k, v, string(CRLF))
+	return nil, false
+}
+
+func encoderForEncodings(encodings []string) (BodyEncoder, string) {
+	for _, encoding := range encodings {
+		if encoder, exists := encoderForEncoding(encoding); exists {
+			return encoder, encoding
 		}
 	}
 
-	b = fmt.Append(b, string(CRLF))
+	return &PlainBodyEncoder{}, ""
+}
+
+func WriteResponse(r *Request, w io.Writer, status Status, body []byte, headers Headers) error {
+	reason := statusReasons[status]
+	b := fmt.Appendf(nil, "HTTP/1.1 %d %s%s", status, reason, string(CRLF))
+
+	if headers.headers != nil {
+		for k, v := range headers.headers {
+			b = appendHeader(b, k, v)
+		}
+	}
+
 	if body != nil {
-		b = fmt.Append(b, string(body))
+		acceptEncoding, _ := r.Headers.Get("Accept-Encoding")
+		encodings := strings.Split(acceptEncoding, ",")
+		encoder, encoding := encoderForEncodings(encodings)
+
+		encodedBody, err := encoder.Encode(body)
+		if err != nil {
+			return fmt.Errorf("failed to encode body: %w", err)
+		}
+
+		b = appendHeader(b, "Content-Length", strconv.Itoa(len(encodedBody)))
+		if encoding != "" {
+			b = appendHeader(b, "Content-Encoding", encoding)
+		}
+
+		b = fmt.Append(b, string(CRLF))
+		b = append(b, encodedBody...)
+	} else {
+		b = fmt.Append(b, string(CRLF))
 	}
 
 	_, err := w.Write(b)
