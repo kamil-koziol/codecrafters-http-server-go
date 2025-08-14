@@ -88,7 +88,7 @@ func WriteResponse(r *Request, w io.Writer, status Status, body []byte, headers 
 
 	if body != nil {
 		acceptEncoding, _ := r.Headers.Get("Accept-Encoding")
-		encodings := strings.Split(acceptEncoding, ",")
+		encodings := strings.Split(acceptEncoding, ", ")
 		encoder, encoding := encoderForEncodings(encodings)
 
 		encodedBody, err := encoder.Encode(body)
