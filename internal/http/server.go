@@ -2,12 +2,13 @@ package http
 
 import (
 	"bytes"
-	"compress/gzip"
 	"fmt"
 	"io"
 	"net"
 	"strconv"
 	"strings"
+
+	"github.com/codecrafters-io/http-server-starter-go/internal/http/encoding"
 )
 
 var CRLF = []byte{'\r', '\n'}
@@ -28,52 +29,36 @@ var statusReasons = map[Status]string{
 	StatusCreated:             "Created",
 }
 
-type BodyEncoder interface {
-	Encode([]byte) ([]byte, error)
-}
-
-type PlainBodyEncoder struct {
-}
-
-func (e *PlainBodyEncoder) Encode(b []byte) ([]byte, error) {
-	return b, nil
-}
-
-type GZIPBodyEncoder struct {
-}
-
-func (e *GZIPBodyEncoder) Encode(b []byte) ([]byte, error) {
-	var buf bytes.Buffer
-	w := gzip.NewWriter(&buf)
-	_, err := w.Write(b)
-	if err != nil {
-		return nil, fmt.Errorf("unable to gzip write: %w", err)
-	}
-	defer w.Close()
-	return buf.Bytes(), nil
-}
-
 func appendHeader(b []byte, key string, value string) []byte {
 	return fmt.Appendf(b, "%s: %s%s", key, value, string(CRLF))
 }
 
-func encoderForEncoding(encoding string) (BodyEncoder, bool) {
-	switch encoding {
+func decoderForEncoding(encodingScheme string) (encoding.Decoder, bool) {
+	switch encodingScheme {
 	case "gzip":
-		return &GZIPBodyEncoder{}, true
+		return &encoding.GZIPDecoder{}, true
 	}
 
 	return nil, false
 }
 
-func encoderForEncodings(encodings []string) (BodyEncoder, string) {
-	for _, encoding := range encodings {
+func encoderForEncoding(encodingScheme string) (encoding.Encoder, bool) {
+	switch encodingScheme {
+	case "gzip":
+		return &encoding.GZIPEncoder{}, true
+	}
+
+	return nil, false
+}
+
+func encoderForEncodings(encodingSchemes []string) (encoding.Encoder, string) {
+	for _, encoding := range encodingSchemes {
 		if encoder, exists := encoderForEncoding(encoding); exists {
 			return encoder, encoding
 		}
 	}
 
-	return &PlainBodyEncoder{}, ""
+	return &encoding.PlainEncoder{}, ""
 }
 
 func WriteResponse(r *Request, w io.Writer, status Status, body []byte, headers Headers) error {
@@ -101,7 +86,7 @@ func WriteResponse(r *Request, w io.Writer, status Status, body []byte, headers 
 			b = appendHeader(b, "Content-Encoding", encoding)
 		}
 
-		b = fmt.Append(b, string(CRLF))
+		b = append(b, CRLF...)
 		b = append(b, encodedBody...)
 	} else {
 		b = fmt.Append(b, string(CRLF))
@@ -181,7 +166,23 @@ func parseRequest(body io.Reader) (*Request, error) {
 					if err != nil {
 						return nil, fmt.Errorf("failed to read body: %v", err)
 					}
-					req.Body = bodyContentsBytes
+
+					var bodyDecoder encoding.Decoder = &encoding.PlainDecoder{}
+					contentEncoding, exists := req.Headers.Get("Content-Encoding")
+					if exists {
+						var encodingExists bool
+						bodyDecoder, encodingExists = decoderForEncoding(contentEncoding)
+						if !encodingExists {
+							return nil, fmt.Errorf("unsupported encoding scheme: %s", contentEncoding)
+						}
+					}
+
+					decoded, err := bodyDecoder.Decode(bodyContentsBytes)
+					if err != nil {
+						return nil, fmt.Errorf("unable to decode: %w", err)
+					}
+
+					req.Body = decoded
 				}
 
 				return &req, nil
