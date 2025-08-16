@@ -217,12 +217,11 @@ func (s *Server) Run(hostport string) error {
 }
 
 func (s *Server) handleConnection(conn net.Conn) {
-	defer conn.Close()
-
-	req, err := parseRequest(conn)
-	if err != nil {
-		return
+	for {
+		req, err := parseRequest(conn)
+		if err != nil {
+			return
+		}
+		s.Router.Handle(req, conn)
 	}
-
-	s.Router.Handle(req, conn)
 }
