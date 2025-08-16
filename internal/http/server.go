@@ -71,6 +71,10 @@ func WriteResponse(r *Request, w io.Writer, status Status, body []byte, headers 
 		}
 	}
 
+	if conn, exists := r.Headers.Get("Connection"); exists && conn == "close" {
+		b = appendHeader(b, "Connection", "close")
+	}
+
 	if body != nil {
 		acceptEncoding, _ := r.Headers.Get("Accept-Encoding")
 		encodings := strings.Split(acceptEncoding, ", ")
@@ -223,5 +227,11 @@ func (s *Server) handleConnection(conn net.Conn) {
 			return
 		}
 		s.Router.Handle(req, conn)
+
+		connecion, exists := req.Headers.Get("Connection")
+		if exists && connecion == "close" {
+			conn.Close()
+			break
+		}
 	}
 }
