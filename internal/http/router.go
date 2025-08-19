@@ -80,7 +80,7 @@ func (r *Router) findRoute(path string, method Method) (*Route, *PathParameters,
 func (r *Router) Handle(req *Request, w io.Writer) {
 	route, pathParameters, found := r.findRoute(req.Path, req.Method)
 	if !found {
-		_ = WriteResponse(req, w, StatusNotFound, nil, Headers{})
+		_ = WriteResponse(req, w, StatusNotFound, nil, nil)
 		return
 	}
 

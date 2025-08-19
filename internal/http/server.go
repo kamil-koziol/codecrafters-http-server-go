@@ -61,20 +61,48 @@ func encoderForEncodings(encodingSchemes []string) (encoding.Encoder, string) {
 	return &encoding.PlainEncoder{}, ""
 }
 
-func WriteResponse(r *Request, w io.Writer, status Status, body []byte, headers Headers) error {
+func WriteStatusLine(w io.Writer, status Status) error {
 	reason := statusReasons[status]
-	b := fmt.Appendf(nil, "HTTP/1.1 %d %s%s", status, reason, string(CRLF))
+	_, err := w.Write([]byte(fmt.Sprintf("HTTP/1.1 %d %s%s", status, reason, string(CRLF))))
+	return err
+}
 
-	if headers.headers != nil {
+func WriteHeaders(w io.Writer, headers *Headers) error {
+	if headers == nil || (headers != nil && len(headers.headers) == 0) {
+		_, err := w.Write(CRLF)
+		return err
+	}
+	for header, val := range headers.headers {
+		_, err := w.Write([]byte(fmt.Sprintf("%s: %s%s", header, val, string(CRLF))))
+		if err != nil {
+			return err
+		}
+	}
+	_, err := w.Write(CRLF)
+	return err
+}
+
+func WriteBody(w io.Writer, body []byte) error {
+	if body != nil {
+		_, err := w.Write(body)
+		return err
+	}
+	return nil
+}
+
+func WriteResponse(r *Request, w io.Writer, status Status, body []byte, headers *Headers) error {
+	h := GetDefaultHeaders()
+	if headers != nil {
 		for k, v := range headers.headers {
-			b = appendHeader(b, k, v)
+			h.Replace(k, v)
 		}
 	}
 
 	if conn, exists := r.Headers.Get("Connection"); exists && conn == "close" {
-		b = appendHeader(b, "Connection", "close")
+		h.Replace("Connection", "close")
 	}
 
+	var finalBody []byte
 	if body != nil {
 		acceptEncoding, _ := r.Headers.Get("Accept-Encoding")
 		encodings := strings.Split(acceptEncoding, ", ")
@@ -85,19 +113,25 @@ func WriteResponse(r *Request, w io.Writer, status Status, body []byte, headers 
 			return fmt.Errorf("failed to encode body: %w", err)
 		}
 
-		b = appendHeader(b, "Content-Length", strconv.Itoa(len(encodedBody)))
+		h.Replace("Content-Length", strconv.Itoa(len(encodedBody)))
 		if encoding != "" {
-			b = appendHeader(b, "Content-Encoding", encoding)
+			h.Replace("Content-Encoding", encoding)
 		}
 
-		b = append(b, CRLF...)
-		b = append(b, encodedBody...)
-	} else {
-		b = fmt.Append(b, string(CRLF))
+		finalBody = encodedBody
 	}
 
-	_, err := w.Write(b)
-	return err
+	if err := WriteStatusLine(w, status); err != nil {
+		return err
+	}
+	if err := WriteHeaders(w, h); err != nil {
+		return err
+	}
+	if err := WriteBody(w, finalBody); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 type Method string
@@ -112,6 +146,8 @@ const (
 // GET /index.html HTTP/1.1\r\nHost: localhost:4221\r\nUser-Agent: curl/7.64.1\r\nAccept: */*\r\n\r\nRequest body
 func parseRequest(body io.Reader) (*Request, error) {
 	req := Request{}
+	req.Headers = NewHeaders()
+
 	var buf []byte
 
 	mode := "requestLine"
